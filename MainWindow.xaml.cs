@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace SBT2;
 
@@ -35,7 +37,16 @@ public partial class MainWindow : Window
             Root.Margin = max ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
             MaxBtn.Content = max ? "\uE923" : "\uE922";
         };
-        Loaded += async (_, _) => { await LoadAsync(); await PingAllAsync(); };
+        Loaded += async (_, _) =>
+        {
+            try { await LoadAsync(); await PingAllAsync(); }
+            catch (Exception ex)
+            {
+                Status.Text = "Ошибка: " + ex.Message;
+                try { File.WriteAllText(Path.Combine(AppPaths.Data, "crash.log"), ex.ToString()); } catch { }
+                Tools.IsEnabled = true; List.IsEnabled = true; MainBtn.IsEnabled = true; PoolList.IsEnabled = true; _busy = false;
+            }
+        };
         Closing += (_, _) => _blocker.Stop();
     }
 
@@ -47,8 +58,8 @@ public partial class MainWindow : Window
     // ----- загрузка -----
     async Task LoadAsync()
     {
-        Status.Text = "Загружаю список серверов…";
-        var (items, source) = await ServerList.LoadAsync();
+        var (items, source) = ServerList.LoadLocal();
+        _ = ServerList.RefreshCacheAsync();
         _saved = SettingsStore.Load();
         foreach (var s in items)
         {
@@ -91,10 +102,11 @@ public partial class MainWindow : Window
         _busy = true;
         Tools.IsEnabled = false; List.IsEnabled = false; MainBtn.IsEnabled = false; PoolList.IsEnabled = false;
 
-        int total = _servers.Count, done = 0;
+        var targets = _servers.Where(s => !_blocker.IsRunning || s.Allow).ToList(); // заблокированные туннели не ответят
+        int total = targets.Count, done = 0;
         Status.Text = $"Замер серверов: 0/{total}…";
         using var sem = new SemaphoreSlim(16);
-        await Task.WhenAll(_servers.ToList().Select(async s =>
+        await Task.WhenAll(targets.Select(async s =>
         {
             await sem.WaitAsync();
             try { s.SetStats(await Pinger.MeasureAsync(s.Ip, s.Port)); }
@@ -185,8 +197,6 @@ public partial class MainWindow : Window
         AfterSelectionChanged();
     }
 
-    async void PingBtn_Click(object s, RoutedEventArgs e) => await PingAllAsync();
-
     // ----- блокировка -----
     void Apply()
     {
@@ -214,6 +224,6 @@ public partial class MainWindow : Window
 
     void MainBtn_Click(object s, RoutedEventArgs e)
     {
-        if (_blocker.IsRunning) { _blocker.Stop(); SetState(false); } else Apply();
+        if (_blocker.IsRunning) { _blocker.Stop(); SetState(false); _ = PingAllAsync(); } else Apply();
     }
 }
