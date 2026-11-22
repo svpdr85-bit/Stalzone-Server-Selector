@@ -8,7 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
-namespace SBT2;
+namespace StalzoneServerSelector;
 
 public partial class MainWindow : Window
 {
@@ -16,7 +16,7 @@ public partial class MainWindow : Window
     readonly Blocker _blocker = new();
     readonly Dictionary<string, (Button btn, string title)> _hdr;
     HashSet<string>? _saved;
-    bool _bulk, _busy;
+    bool _bulk, _busy, _exiting;
     string? _pool;
     string _sortKey = "score";
     bool _sortAsc = true;
@@ -37,17 +37,58 @@ public partial class MainWindow : Window
             Root.Margin = max ? SystemParameters.WindowResizeBorderThickness : new Thickness(0);
             MaxBtn.Content = max ? "\uE923" : "\uE922";
         };
-        Loaded += async (_, _) =>
+        Closing += (_, e) =>
         {
-            try { await LoadAsync(); await PingAllAsync(); }
-            catch (Exception ex)
-            {
-                Status.Text = "Ошибка: " + ex.Message;
-                try { File.WriteAllText(Path.Combine(AppPaths.Data, "crash.log"), ex.ToString()); } catch { }
-                Tools.IsEnabled = true; List.IsEnabled = true; MainBtn.IsEnabled = true; PoolList.IsEnabled = true; _busy = false;
-            }
+            if (!_exiting && SettingsStore.Current.CloseToTray) { e.Cancel = true; Hide(); return; }   // закрытие = в трей
+            _blocker.Stop();
         };
-        Closing += (_, _) => _blocker.Stop();
+    }
+
+    // ----- запуск и работа в фоне -----
+    // Вызывается из App сразу при старте (окно при этом может быть скрыто)
+    public async Task StartAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            var st = SettingsStore.Current;
+            if (st.AutoStart) _ = Task.Run(() => Autostart.Enable(st.StartHidden));   // обновит путь, если exe переместили
+            if (st.AutoApply && _saved != null && _servers.Any(s => s.Allow))
+            {
+                Apply(silent: true);
+                if (_blocker.IsRunning) Status.Text = "Блокировка включена автоматически по сохранённому выбору.";
+            }
+            await PingAllAsync();
+        }
+        catch (Exception ex)
+        {
+            Status.Text = "Ошибка: " + ex.Message;
+            try { File.WriteAllText(Path.Combine(AppPaths.Data, "crash.log"), ex.ToString()); } catch { }
+            Tools.IsEnabled = true; List.IsEnabled = true; MainBtn.IsEnabled = true; PoolList.IsEnabled = true; _busy = false;
+        }
+    }
+
+    public void PrepareExit() => _exiting = true;
+
+    public void ShowFromTray()
+    {
+        if (!IsVisible) Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    public void ExitApp()
+    {
+        _exiting = true;
+        _blocker.Stop();
+        Application.Current.Shutdown();
+    }
+
+    public void ToggleBlock()
+    {
+        if (_busy) return;
+        if (_blocker.IsRunning) { _blocker.Stop(); SetState(false); }
+        else Apply(silent: !IsVisible);
     }
 
     // ----- кнопки заголовка -----
@@ -102,14 +143,14 @@ public partial class MainWindow : Window
         _busy = true;
         Tools.IsEnabled = false; List.IsEnabled = false; MainBtn.IsEnabled = false; PoolList.IsEnabled = false;
 
-        var targets = _servers.Where(s => !_blocker.IsRunning || s.Allow).ToList(); // заблокированные туннели не ответят
+        var targets = _servers.ToList();   // замеряем все серверы, в том числе при включённой блокировке
         int total = targets.Count, done = 0;
         Status.Text = $"Замер серверов: 0/{total}…";
         using var sem = new SemaphoreSlim(16);
         await Task.WhenAll(targets.Select(async s =>
         {
             await sem.WaitAsync();
-            try { s.SetStats(await Pinger.MeasureAsync(s.Ip, s.Port)); }
+            try { s.SetStats(await Pinger.MeasureAsync(s.Ip, s.Port, 10, s.Pool)); }
             finally { sem.Release(); Status.Text = $"Замер серверов: {++done}/{total}…"; }
         }));
 
@@ -198,17 +239,28 @@ public partial class MainWindow : Window
     }
 
     // ----- блокировка -----
-    void Apply()
+    void Apply(bool silent = false)
     {
         if (_servers.All(s => !s.Allow))
         {
             _blocker.Stop(); SetState(false);
-            MessageBox.Show("Отметьте хотя бы один сервер, иначе заблокируются все.", "Stalzone Server Selector");
+            if (silent) Status.Text = "Не выбрано ни одного сервера: блокировка не включена.";
+            else MessageBox.Show("Отметьте хотя бы один сервер, иначе заблокируются все.", "Stalzone Server Selector");
             return;
         }
         var blocked = _servers.Where(s => !s.Allow).Select(s => s.Ip).Distinct().ToList();
         var err = _blocker.Start(blocked);
-        if (err != null) { SetState(false); MessageBox.Show(err, "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error); return; }
+        if (err != null)
+        {
+            SetState(false);
+            if (silent)
+            {
+                Status.Text = "Ошибка блокировки: " + err;
+                ((App)Application.Current).Tray?.Notify("Не удалось включить блокировку: " + err);
+            }
+            else MessageBox.Show(err, "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
         SetState(true);
     }
 
@@ -220,10 +272,43 @@ public partial class MainWindow : Window
         PillText.Text = on ? "● Блокировка активна" : "Выключено";
         MainBtn.Content = on ? "■  Остановить" : "▶  Применить";
         MainBtn.Background = (Brush)conv.ConvertFrom(on ? "#E5484D" : "#2FBF71")!;
+        ((App)Application.Current).Tray?.SetBlocking(on);
     }
 
-    void MainBtn_Click(object s, RoutedEventArgs e)
+    void MainBtn_Click(object s, RoutedEventArgs e) => ToggleBlock();
+
+    // ----- настройки -----
+    void Settings_Click(object s, RoutedEventArgs e)
     {
-        if (_blocker.IsRunning) { _blocker.Stop(); SetState(false); _ = PingAllAsync(); } else Apply();
+        var st = SettingsStore.Current;
+        ChkAutoStart.IsChecked = st.AutoStart;
+        ChkHidden.IsChecked = st.StartHidden;
+        ChkAutoApply.IsChecked = st.AutoApply;
+        ChkTray.IsChecked = st.CloseToTray;
+        SettingsOverlay.Visibility = Visibility.Visible;
+    }
+
+    void SettingsClose_Click(object s, RoutedEventArgs e) => SettingsOverlay.Visibility = Visibility.Collapsed;
+
+    void Setting_Click(object s, RoutedEventArgs e)
+    {
+        var st = SettingsStore.Current;
+        st.StartHidden = ChkHidden.IsChecked == true;
+        st.AutoApply = ChkAutoApply.IsChecked == true;
+        st.CloseToTray = ChkTray.IsChecked == true;
+
+        bool want = ChkAutoStart.IsChecked == true;
+        if (want || st.AutoStart)
+        {
+            var err = want ? Autostart.Enable(st.StartHidden) : Autostart.Disable();
+            if (err != null)
+            {
+                MessageBox.Show(err, "Автозапуск", MessageBoxButton.OK, MessageBoxImage.Warning);
+                want = Autostart.IsEnabled();          // показываем реальное состояние
+                ChkAutoStart.IsChecked = want;
+            }
+        }
+        st.AutoStart = want;
+        SettingsStore.Save();
     }
 }

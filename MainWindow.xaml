@@ -1,8 +1,8 @@
-<Window x:Class="SBT2.MainWindow"
+<Window x:Class="StalzoneServerSelector.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="Stalzone Server Selector" Width="1180" Height="740" MinWidth="1110" MinHeight="520"
+        Title="Stalzone Server Selector" Icon="app.ico" Width="1180" Height="740" MinWidth="1110" MinHeight="520"
         Background="#0F1218" WindowStartupLocation="CenterScreen" FontFamily="Segoe UI">
   <shell:WindowChrome.WindowChrome>
     <shell:WindowChrome CaptionHeight="36" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
@@ -33,6 +33,7 @@
           <Border x:Name="Pill" DockPanel.Dock="Right" CornerRadius="14" Padding="14,6" VerticalAlignment="Center" Background="#232A38">
             <TextBlock x:Name="PillText" Text="Выключено" Foreground="#9AA4B8" FontSize="12" FontWeight="SemiBold"/>
           </Border>
+          <Button DockPanel.Dock="Right" Style="{StaticResource Btn}" Content="⚙  Настройки" Margin="0,0,10,0" Click="Settings_Click"/>
           <StackPanel>
             <TextBlock Text="Выбор сервера" Foreground="White" FontSize="26" FontWeight="Bold"/>
             <TextBlock Text="Отметьте серверы, на которые хотите попасть. Остальные будут заблокированы." Foreground="#7A8499" FontSize="12" Margin="0,2,0,0"/>
@@ -107,7 +108,7 @@
                         <TextBlock Grid.Column="3" Text="{Binding Address}" Foreground="#9AA4B8" FontSize="12" FontFamily="Consolas" VerticalAlignment="Center"/>
                         <ProgressBar Grid.Column="4" Value="{Binding PingBar, Mode=OneWay}" Maximum="100" Height="6" Width="70" HorizontalAlignment="Left" BorderThickness="0"
                                      Background="#232A38" Foreground="{Binding PingBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="5" Text="{Binding PingText}" Foreground="{Binding PingBrush}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="Ожидаемый пинг в игре: до туннеля + туннель→сервер. Обычно отличается от HUD не более чем на 10 мс."/>
+                        <TextBlock Grid.Column="5" Text="{Binding PingText}" Foreground="{Binding PingBrush}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="Ожидаемый пинг в игре: до туннеля + туннель→сервер. Для пула MSK2X учитывается только путь до туннеля."/>
                         <TextBlock Grid.Column="6" Text="{Binding MinMaxText}" Foreground="#9AA4B8" FontSize="12" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="7" Text="{Binding JitterText}" Foreground="#9AA4B8" FontSize="12" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="8" Text="{Binding LossText}" Foreground="{Binding LossBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="{Binding LossTip}"/>
@@ -128,6 +129,35 @@
                   Padding="26,12" Content="▶  Применить" Click="MainBtn_Click"/>
           <TextBlock x:Name="Status" Foreground="#7A8499" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,14,0"/>
         </DockPanel>
+      </Grid>
+
+      <!-- Настройки -->
+      <Grid x:Name="SettingsOverlay" Grid.Row="1" Visibility="Collapsed" Background="#D90B0E13">
+        <Border Background="#171C26" CornerRadius="16" Padding="28" Width="580" VerticalAlignment="Center" HorizontalAlignment="Center"
+                BorderBrush="#232A38" BorderThickness="1">
+          <StackPanel>
+            <TextBlock Text="Настройки" Foreground="White" FontSize="22" FontWeight="Bold"/>
+            <TextBlock Text="Фоновая работа и автоматическая блокировка" Foreground="#7A8499" FontSize="12" Margin="0,2,0,20"/>
+
+            <CheckBox x:Name="ChkAutoStart" Style="{StaticResource LabeledCheck}" Content="Запускать вместе с Windows" Click="Setting_Click"/>
+            <TextBlock Foreground="#7A8499" FontSize="11" Margin="32,4,0,16" TextWrapping="Wrap"
+                       Text="Создаётся задача в Планировщике Windows с правами администратора, поэтому окно запроса UAC при входе не появляется."/>
+
+            <CheckBox x:Name="ChkHidden" Style="{StaticResource LabeledCheck}" Content="При автозапуске скрывать окно (работать в трее)" Click="Setting_Click"/>
+            <TextBlock Foreground="#7A8499" FontSize="11" Margin="32,4,0,16" TextWrapping="Wrap"
+                       Text="Окно можно открыть двойным щелчком по значку в трее."/>
+
+            <CheckBox x:Name="ChkAutoApply" Style="{StaticResource LabeledCheck}" Content="Включать блокировку автоматически при запуске" Click="Setting_Click"/>
+            <TextBlock Foreground="#7A8499" FontSize="11" Margin="32,4,0,16" TextWrapping="Wrap"
+                       Text="Используется последний сохранённый выбор серверов: отмеченные разрешены, остальные блокируются."/>
+
+            <CheckBox x:Name="ChkTray" Style="{StaticResource LabeledCheck}" Content="Кнопка закрытия сворачивает программу в трей" Click="Setting_Click"/>
+            <TextBlock Foreground="#7A8499" FontSize="11" Margin="32,4,0,20" TextWrapping="Wrap"
+                       Text="Полностью выйти можно через значок в трее: правая кнопка, «Выход». При выходе блокировка выключается."/>
+
+            <Button Style="{StaticResource Btn}" Background="#4F8CFF" Content="Готово" HorizontalAlignment="Right" Click="SettingsClose_Click"/>
+          </StackPanel>
+        </Border>
       </Grid>
     </Grid>
   </Border>
